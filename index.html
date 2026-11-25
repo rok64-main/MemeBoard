@@ -59,6 +59,11 @@ button:hover {
     background: #414141;
 }
 
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 #soundGrid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
@@ -120,7 +125,7 @@ button:hover {
     <button id="loadButton">Load 100+ sounds</button>
 </div>
 
-<div id="status">Ready</div>
+<div id="status">Loading sounds...</div>
 <div id="soundGrid"></div>
 
 <button id="loadMore">Load more</button>
@@ -131,16 +136,14 @@ button:hover {
 </div>
 
 <script>
-const API_HOSTS = [
-    "https://myinstants-api.page.gd",
-    "https://myinstants-api.vercel.app"
-];
-
 const grid = document.getElementById("soundGrid");
 const statusText = document.getElementById("status");
 const searchInput = document.getElementById("search");
 const categorySelect = document.getElementById("category");
 const loadMoreButton = document.getElementById("loadMore");
+const loadButton = document.getElementById("loadButton");
+
+const API = "https://myinstants-api.page.gd";
 
 let sounds = [];
 let currentPage = 1;
@@ -150,30 +153,27 @@ let loading = false;
 let usedUrls = new Set();
 
 async function requestSounds(query, page) {
-    let lastError;
+    const apiUrl =
+        `${API}/search?q=${encodeURIComponent(query)}&page=${page}`;
 
-    for (const host of API_HOSTS) {
-        try {
-            const url = `${host}/search?q=${encodeURIComponent(query)}&page=${page}`;
-            const response = await fetch(url);
+    const proxyUrl =
+        "https://proxy.cors.dev/" + apiUrl;
 
-            if (!response.ok) {
-                throw new Error(`Server returned ${response.status}`);
-            }
+    const response = await fetch(proxyUrl, {
+        credentials: "omit"
+    });
 
-            const result = await response.json();
-
-            if (!result || !Array.isArray(result.data)) {
-                throw new Error("Unexpected API response");
-            }
-
-            return result.data;
-        } catch (error) {
-            lastError = error;
-        }
+    if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
     }
 
-    throw lastError || new Error("Could not connect to the sound API.");
+    const result = await response.json();
+
+    if (!Array.isArray(result.data)) {
+        throw new Error("Unexpected API response");
+    }
+
+    return result.data;
 }
 
 function getSoundUrl(sound) {
@@ -213,7 +213,8 @@ function playSound(url) {
     activeAudio = new Audio(url);
     activeAudio.volume = 0.8;
 
-    activeAudio.play().catch(() => {
+    activeAudio.play().catch(error => {
+        console.error("Audio error:", error);
         statusText.textContent = "Could not play this sound.";
     });
 }
@@ -223,7 +224,7 @@ async function loadPage() {
 
     loading = true;
     loadMoreButton.disabled = true;
-    statusText.textContent = `Loading sounds...`;
+    statusText.textContent = "Loading sounds...";
 
     try {
         const results = await requestSounds(currentQuery, currentPage);
@@ -240,15 +241,14 @@ async function loadPage() {
             `${sounds.length} sounds loaded. ${added} new sounds added.`;
 
         if (results.length === 0) {
-            loadMoreButton.disabled = true;
             statusText.textContent = "No more sounds found.";
+            loadMoreButton.disabled = true;
         } else {
             loadMoreButton.disabled = false;
         }
     } catch (error) {
-        console.error(error);
-        statusText.textContent =
-            "API unavailable: " + (error.message || "Connection failed.");
+        console.error("MemeBoard API error:", error);
+        statusText.textContent = "API unavailable: " + error.message;
         loadMoreButton.disabled = false;
     }
 
@@ -260,7 +260,7 @@ async function loadManySounds() {
 
     loading = true;
     loadMoreButton.disabled = true;
-    document.getElementById("loadButton").disabled = true;
+    loadButton.disabled = true;
 
     const queries = [
         "vine boom",
@@ -279,6 +279,8 @@ async function loadManySounds() {
 
     statusText.textContent = "Loading sounds...";
 
+    let failures = 0;
+
     for (const query of queries) {
         for (let page = 1; page <= 2; page++) {
             try {
@@ -292,25 +294,34 @@ async function loadManySounds() {
                     `${sounds.length} unique sounds loaded...`;
             } catch (error) {
                 console.error(query, page, error);
+                failures++;
                 break;
             }
         }
     }
 
-    statusText.textContent =
-        `${sounds.length} unique sounds loaded.`;
+    statusText.textContent = failures
+        ? `${sounds.length} sounds loaded. Some searches failed.`
+        : `${sounds.length} unique sounds loaded.`;
 
     loading = false;
     loadMoreButton.disabled = false;
-    document.getElementById("loadButton").disabled = false;
+    loadButton.disabled = false;
 }
 
 function resetSounds(query) {
+    if (activeAudio) {
+        activeAudio.pause();
+        activeAudio = null;
+    }
+
     sounds = [];
     usedUrls.clear();
     grid.innerHTML = "";
     currentPage = 1;
     currentQuery = query;
+    loadMoreButton.disabled = false;
+
     loadPage();
 }
 
@@ -322,18 +333,15 @@ searchInput.addEventListener("keydown", event => {
 });
 
 categorySelect.addEventListener("change", () => {
-    const query = categorySelect.value;
+    const query = categorySelect.value === "all"
+        ? "meme"
+        : categorySelect.value;
 
-    if (query === "all") {
-        resetSounds("meme");
-    } else {
-        resetSounds(query);
-    }
+    resetSounds(query);
 });
 
 loadMoreButton.addEventListener("click", loadPage);
-
-document.getElementById("loadButton").addEventListener("click", loadManySounds);
+loadButton.addEventListener("click", loadManySounds);
 
 document.getElementById("stopButton").addEventListener("click", () => {
     if (activeAudio) {
