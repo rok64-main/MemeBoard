@@ -21,10 +21,10 @@ body {
 
 h1 {
     font-size: 30px;
-    margin: 0 0 20px;
+    margin-bottom: 20px;
 }
 
-input, select {
+input {
     background: #222;
     color: white;
     border: 1px solid #444;
@@ -42,7 +42,6 @@ input, select {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
-    margin-bottom: 15px;
 }
 
 button {
@@ -51,17 +50,12 @@ button {
     border: 1px solid #444;
     border-radius: 6px;
     padding: 12px 15px;
-    font-size: 14px;
     cursor: pointer;
+    font-size: 14px;
 }
 
 button:hover {
     background: #414141;
-}
-
-button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
 }
 
 #soundGrid {
@@ -78,12 +72,8 @@ button:disabled {
 
 #status {
     color: #aaa;
+    margin: 15px 0;
     font-size: 13px;
-    margin: 12px 0;
-}
-
-#loadMore {
-    margin-top: 18px;
 }
 
 .tts {
@@ -96,254 +86,92 @@ button:disabled {
     flex: 1;
     min-width: 0;
 }
-
-@media (max-width: 500px) {
-    body {
-        padding: 15px;
-    }
-}
 </style>
 </head>
 <body>
 
 <h1>MemeBoard</h1>
 
-<input id="search" type="text" placeholder="Search sounds...">
+<input id="search" placeholder="Search sounds...">
 
 <div class="controls">
-    <select id="category">
-        <option value="all">All sounds</option>
-        <option value="vine boom">Memes</option>
-        <option value="bruh">Reactions</option>
-        <option value="gaming">Gaming</option>
-        <option value="funny">Funny</option>
-        <option value="tiktok">TikTok</option>
-        <option value="sound effect">Sound effects</option>
-    </select>
-
-    <button id="stopButton">Stop sound</button>
-    <button id="loadButton">Load 100+ sounds</button>
+    <button onclick="stopSound()">Stop sound</button>
+    <button onclick="loadSounds()">Reload sounds</button>
 </div>
 
 <div id="status">Loading sounds...</div>
 <div id="soundGrid"></div>
 
-<button id="loadMore">Load more</button>
-
 <div class="tts">
-    <input id="ttsText" type="text" placeholder="Type something for text-to-speech...">
-    <button id="speakButton">Speak</button>
+    <input id="ttsText" placeholder="Type something for text-to-speech...">
+    <button onclick="speak()">Speak</button>
 </div>
 
 <script>
+let sounds = [];
+let activeAudio = null;
+
 const grid = document.getElementById("soundGrid");
 const statusText = document.getElementById("status");
 const searchInput = document.getElementById("search");
-const categorySelect = document.getElementById("category");
-const loadMoreButton = document.getElementById("loadMore");
-const loadButton = document.getElementById("loadButton");
 
-const API = "https://myinstants-api.page.gd";
+async function loadSounds() {
+    statusText.textContent = "Loading sounds...";
 
-let sounds = [];
-let currentPage = 1;
-let currentQuery = "vine boom";
-let activeAudio = null;
-let loading = false;
-let usedUrls = new Set();
+    try {
+        const response = await fetch("./sounds.json");
 
-async function requestSounds(query, page) {
-    const apiUrl =
-        `${API}/search?q=${encodeURIComponent(query)}&page=${page}`;
+        if (!response.ok) {
+            throw new Error("Could not load sounds.json");
+        }
 
-    const proxyUrl =
-        "https://proxy.cors.dev/" + apiUrl;
+        const data = await response.json();
 
-    const response = await fetch(proxyUrl, {
-        credentials: "omit"
-    });
+        if (!Array.isArray(data)) {
+            throw new Error("sounds.json must contain an array");
+        }
 
-    if (!response.ok) {
-        throw new Error(`Request failed: ${response.status}`);
+        sounds = data;
+        displaySounds(sounds);
+
+        statusText.textContent = `${sounds.length} sounds loaded.`;
+    } catch (error) {
+        console.error(error);
+        statusText.textContent = error.message;
     }
+}
 
-    const result = await response.json();
+function displaySounds(list) {
+    grid.innerHTML = "";
 
-    if (!Array.isArray(result.data)) {
-        throw new Error("Unexpected API response");
+    for (const sound of list) {
+        if (!sound.title || !sound.mp3) continue;
+
+        const button = document.createElement("button");
+        button.className = "sound-button";
+        button.textContent = sound.title;
+
+        button.addEventListener("click", () => {
+            playSound(sound.mp3);
+        });
+
+        grid.appendChild(button);
     }
-
-    return result.data;
-}
-
-function getSoundUrl(sound) {
-    return sound.mp3 || sound.url || sound.audio || "";
-}
-
-function getSoundTitle(sound) {
-    return sound.title || sound.name || "Untitled sound";
-}
-
-function addSound(sound) {
-    const url = getSoundUrl(sound);
-    const title = getSoundTitle(sound);
-
-    if (!url || usedUrls.has(url)) return false;
-
-    usedUrls.add(url);
-    sounds.push(sound);
-
-    const button = document.createElement("button");
-    button.className = "sound-button";
-    button.textContent = title;
-    button.title = title;
-
-    button.addEventListener("click", () => playSound(url));
-
-    grid.appendChild(button);
-    return true;
 }
 
 function playSound(url) {
-    if (activeAudio) {
-        activeAudio.pause();
-        activeAudio.currentTime = 0;
-    }
+    stopSound();
 
     activeAudio = new Audio(url);
     activeAudio.volume = 0.8;
 
     activeAudio.play().catch(error => {
-        console.error("Audio error:", error);
+        console.error(error);
         statusText.textContent = "Could not play this sound.";
     });
 }
 
-async function loadPage() {
-    if (loading) return;
-
-    loading = true;
-    loadMoreButton.disabled = true;
-    statusText.textContent = "Loading sounds...";
-
-    try {
-        const results = await requestSounds(currentQuery, currentPage);
-
-        let added = 0;
-
-        for (const sound of results) {
-            if (addSound(sound)) added++;
-        }
-
-        currentPage++;
-
-        statusText.textContent =
-            `${sounds.length} sounds loaded. ${added} new sounds added.`;
-
-        if (results.length === 0) {
-            statusText.textContent = "No more sounds found.";
-            loadMoreButton.disabled = true;
-        } else {
-            loadMoreButton.disabled = false;
-        }
-    } catch (error) {
-        console.error("MemeBoard API error:", error);
-        statusText.textContent = "API unavailable: " + error.message;
-        loadMoreButton.disabled = false;
-    }
-
-    loading = false;
-}
-
-async function loadManySounds() {
-    if (loading) return;
-
-    loading = true;
-    loadMoreButton.disabled = true;
-    loadButton.disabled = true;
-
-    const queries = [
-        "vine boom",
-        "bruh",
-        "among us",
-        "roblox",
-        "goofy",
-        "meme",
-        "laugh",
-        "vine",
-        "tiktok",
-        "windows error",
-        "cartoon",
-        "sound effect"
-    ];
-
-    statusText.textContent = "Loading sounds...";
-
-    let failures = 0;
-
-    for (const query of queries) {
-        for (let page = 1; page <= 2; page++) {
-            try {
-                const results = await requestSounds(query, page);
-
-                for (const sound of results) {
-                    addSound(sound);
-                }
-
-                statusText.textContent =
-                    `${sounds.length} unique sounds loaded...`;
-            } catch (error) {
-                console.error(query, page, error);
-                failures++;
-                break;
-            }
-        }
-    }
-
-    statusText.textContent = failures
-        ? `${sounds.length} sounds loaded. Some searches failed.`
-        : `${sounds.length} unique sounds loaded.`;
-
-    loading = false;
-    loadMoreButton.disabled = false;
-    loadButton.disabled = false;
-}
-
-function resetSounds(query) {
-    if (activeAudio) {
-        activeAudio.pause();
-        activeAudio = null;
-    }
-
-    sounds = [];
-    usedUrls.clear();
-    grid.innerHTML = "";
-    currentPage = 1;
-    currentQuery = query;
-    loadMoreButton.disabled = false;
-
-    loadPage();
-}
-
-searchInput.addEventListener("keydown", event => {
-    if (event.key === "Enter") {
-        const query = searchInput.value.trim();
-        if (query) resetSounds(query);
-    }
-});
-
-categorySelect.addEventListener("change", () => {
-    const query = categorySelect.value === "all"
-        ? "meme"
-        : categorySelect.value;
-
-    resetSounds(query);
-});
-
-loadMoreButton.addEventListener("click", loadPage);
-loadButton.addEventListener("click", loadManySounds);
-
-document.getElementById("stopButton").addEventListener("click", () => {
+function stopSound() {
     if (activeAudio) {
         activeAudio.pause();
         activeAudio.currentTime = 0;
@@ -351,9 +179,9 @@ document.getElementById("stopButton").addEventListener("click", () => {
     }
 
     speechSynthesis.cancel();
-});
+}
 
-document.getElementById("speakButton").addEventListener("click", () => {
+function speak() {
     const text = document.getElementById("ttsText").value.trim();
 
     if (!text) return;
@@ -361,14 +189,20 @@ document.getElementById("speakButton").addEventListener("click", () => {
     speechSynthesis.cancel();
 
     const message = new SpeechSynthesisUtterance(text);
-    message.rate = 1;
-    message.pitch = 1;
-    message.volume = 1;
-
     speechSynthesis.speak(message);
+}
+
+searchInput.addEventListener("input", () => {
+    const query = searchInput.value.toLowerCase();
+
+    const filtered = sounds.filter(sound =>
+        sound.title.toLowerCase().includes(query)
+    );
+
+    displaySounds(filtered);
 });
 
-resetSounds("vine boom");
+loadSounds();
 </script>
 
 </body>
